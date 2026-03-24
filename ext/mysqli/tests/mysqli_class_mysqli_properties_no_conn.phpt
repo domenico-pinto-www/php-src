@@ -250,6 +250,7 @@ mysqli object is already closed
 mysqli object is already closed
 mysqli object is already closed
 mysqli object is already closed
+last_query_error = 'NULL'
 mysqli object is already closed
 mysqli object is already closed
 mysqli object is already closed
@@ -258,6 +259,7 @@ mysqli object is already closed
 mysqli object is already closed
 
 Object variables:
+last_query_error = 'NULL'
 
 Magic, magic properties:
 mysqli object is already closed
@@ -314,6 +316,7 @@ mysqli object is already closed
 mysqli object is already closed
 mysqli object is already closed
 mysqli object is already closed
+last_query_error = 'NULL'
 mysqli object is already closed
 mysqli object is already closed
 mysqli object is already closed
@@ -322,6 +325,7 @@ mysqli object is already closed
 mysqli object is already closed
 
 Object variables:
+last_query_error = 'NULL'
 
 Magic, magic properties:
 mysqli object is already closed

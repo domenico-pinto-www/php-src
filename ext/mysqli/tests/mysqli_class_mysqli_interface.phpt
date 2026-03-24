@@ -110,9 +110,12 @@ require_once 'skipifconnectfailure.inc';
         "thread_id"			=> true,
         "warning_count"		=> true,
         "error_list"		=> true,
+        "last_query_error"	=> true,
     ];
 
-    $expected_object_variables = [];
+    $expected_object_variables = [
+        "last_query_error" => true,
+    ];
 
     $variables = get_class_vars(get_class($mysqli));
     foreach ($variables as $var => $v) {
