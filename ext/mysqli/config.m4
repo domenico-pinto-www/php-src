@@ -58,6 +58,7 @@ if test "$PHP_MYSQLI" != "no"; then
 
   PHP_NEW_EXTENSION([mysqli], m4_normalize([
       mysqli_api.c
+      mysqli_cache.c
       mysqli_driver.c
       mysqli_exception.c
       mysqli_nonapi.c

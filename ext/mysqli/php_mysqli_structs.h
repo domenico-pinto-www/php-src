@@ -235,6 +235,12 @@ ZEND_BEGIN_MODULE_GLOBALS(mysqli)
 	zend_long			error_no;
 	zend_long			report_mode;
 	bool 				rollback_on_cached_plink;
+	/* Query cache */
+	bool				cache_enabled;
+	zend_long			cache_size;    /* MB */
+	zend_long			cache_ttl;     /* seconds */
+	bool				cache_debug;   /* syslog */
+	char				*cache_file;
 ZEND_END_MODULE_GLOBALS(mysqli)
 
 #define MyG(v) ZEND_MODULE_GLOBALS_ACCESSOR(mysqli, v)

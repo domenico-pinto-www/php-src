@@ -397,6 +397,7 @@ PHP_MYSQLI_EXPORT(zend_object *) mysqli_objects_new(zend_class_entry *class_type
 /* }}} */
 
 #include "ext/mysqlnd/mysqlnd_reverse_api.h"
+#include "mysqli_cache.h"
 static MYSQLND *mysqli_convert_zv_to_mysqlnd(zval * zv)
 {
 	if (Z_TYPE_P(zv) == IS_OBJECT && instanceof_function(Z_OBJCE_P(zv), mysqli_link_class_entry)) {
@@ -449,6 +450,12 @@ PHP_INI_BEGIN()
 #endif
 	STD_PHP_INI_BOOLEAN("mysqli.allow_local_infile",	"0",	PHP_INI_SYSTEM,		OnUpdateBool,		allow_local_infile,	zend_mysqli_globals,		mysqli_globals)
 	STD_PHP_INI_ENTRY("mysqli.local_infile_directory",	NULL,	PHP_INI_SYSTEM,		OnUpdateString,		local_infile_directory,	zend_mysqli_globals,	mysqli_globals)
+	/* Query cache */
+	STD_PHP_INI_BOOLEAN("mysqli.cache_enabled",	"0",	PHP_INI_SYSTEM,	OnUpdateBool,	cache_enabled,	zend_mysqli_globals,	mysqli_globals)
+	STD_PHP_INI_ENTRY("mysqli.cache_size",		"16",	PHP_INI_SYSTEM,	OnUpdateLong,	cache_size,		zend_mysqli_globals,	mysqli_globals)
+	STD_PHP_INI_ENTRY("mysqli.cache_ttl",		"30",	PHP_INI_SYSTEM,	OnUpdateLong,	cache_ttl,		zend_mysqli_globals,	mysqli_globals)
+	STD_PHP_INI_BOOLEAN("mysqli.cache_debug",	"0",	PHP_INI_ALL,	OnUpdateBool,	cache_debug,	zend_mysqli_globals,	mysqli_globals)
+	STD_PHP_INI_ENTRY("mysqli.cache_file",		MYSQLI_CACHE_FILE, PHP_INI_SYSTEM, OnUpdateString, cache_file, zend_mysqli_globals, mysqli_globals)
 PHP_INI_END()
 /* }}} */
 
@@ -546,6 +553,12 @@ PHP_MINIT_FUNCTION(mysqli)
 	/* Declare 'last_query_error' property to store last failed query */
 	zend_declare_property_null(mysqli_link_class_entry, "last_query_error", sizeof("last_query_error")-1, ZEND_ACC_PUBLIC);
 
+	/* Initialize query cache if enabled */
+	if (MyG(cache_enabled)) {
+		size_t cache_bytes = (size_t)(MyG(cache_size) > 0 ? MyG(cache_size) : 16) * 1024 * 1024;
+		mysqli_cache_init(cache_bytes, MyG(cache_file));
+	}
+
 	return SUCCESS;
 }
 /* }}} */
@@ -553,6 +566,7 @@ PHP_MINIT_FUNCTION(mysqli)
 /* {{{ PHP_MSHUTDOWN_FUNCTION */
 PHP_MSHUTDOWN_FUNCTION(mysqli)
 {
+	mysqli_cache_shutdown();
 	zend_hash_destroy(&mysqli_driver_properties);
 	zend_hash_destroy(&mysqli_result_properties);
 	zend_hash_destroy(&mysqli_stmt_properties);

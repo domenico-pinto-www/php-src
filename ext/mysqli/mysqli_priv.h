@@ -88,6 +88,7 @@ PHP_MYSQLI_EXPORT(zend_object *) mysqli_objects_new(zend_class_entry *);
 #define MYSQLI_USE_RESULT 	1
 #define MYSQLI_ASYNC	 	8
 #define MYSQLI_STORE_RESULT_COPY_DATA 16
+#define MYSQLI_CACHE		32
 
 /* for mysqli_fetch_assoc */
 #define MYSQLI_ASSOC	1

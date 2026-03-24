@@ -26,6 +26,7 @@
 #include "zend_smart_str.h"
 #include "php_mysqli_structs.h"
 #include "mysqli_priv.h"
+#include "mysqli_cache.h"
 #define ERROR_ARG_POS(arg_num) (hasThis() ? (arg_num-1) : (arg_num))
 
 #define SAFE_STR(a) ((a)?a:"")
@@ -580,8 +581,13 @@ PHP_FUNCTION(mysqli_query)
 		zend_argument_must_not_be_empty_error(ERROR_ARG_POS(2));
 		RETURN_THROWS();
 	}
-	if ((resultmode & ~MYSQLI_ASYNC) != MYSQLI_USE_RESULT &&
-		MYSQLI_STORE_RESULT != (resultmode & ~(MYSQLI_ASYNC | MYSQLI_STORE_RESULT_COPY_DATA))
+	bool use_cache = (resultmode & MYSQLI_CACHE) && MyG(cache_enabled);
+
+	/* Strip MYSQLI_CACHE from resultmode before validation */
+	zend_long effective_mode = resultmode & ~MYSQLI_CACHE;
+
+	if ((effective_mode & ~MYSQLI_ASYNC) != MYSQLI_USE_RESULT &&
+		MYSQLI_STORE_RESULT != (effective_mode & ~(MYSQLI_ASYNC | MYSQLI_STORE_RESULT_COPY_DATA))
 	) {
 		zend_argument_value_error(ERROR_ARG_POS(3), "must be either MYSQLI_USE_RESULT or MYSQLI_STORE_RESULT with MYSQLI_ASYNC as an optional bitmask flag");
 		RETURN_THROWS();
@@ -591,18 +597,55 @@ PHP_FUNCTION(mysqli_query)
 
 	MYSQLI_DISABLE_MQ;
 
-
-	if (resultmode & MYSQLI_ASYNC) {
+	if (effective_mode & MYSQLI_ASYNC) {
 		if (mysqli_async_query(mysql->mysql, query, query_len)) {
 			/* Save failed query string to 'last_query_error' before reporting error (which may throw) */
 			zend_update_property_string(Z_OBJCE_P(ZEND_THIS), Z_OBJ_P(ZEND_THIS), "last_query_error", sizeof("last_query_error")-1, query);
 			MYSQLI_REPORT_MYSQL_ERROR(mysql->mysql);
 			RETURN_FALSE;
 		}
-		mysql->async_result_fetch_type = resultmode & ~MYSQLI_ASYNC;
+		mysql->async_result_fetch_type = effective_mode & ~MYSQLI_ASYNC;
 		RETURN_TRUE;
 	}
 
+	/* ---- Cache lookup ---- */
+	if (use_cache) {
+		if (mysqli_cache_is_blacklisted(query, query_len)) {
+			/* Query contains time-dependent functions — skip cache */
+			if (MyG(cache_debug)) {
+				mysqli_cache_log("SKIP", NULL, query, "(blacklisted function)");
+			}
+			use_cache = false;
+		} else {
+			char cache_key[MYSQLI_CACHE_KEY_LEN];
+			mysqli_cache_compute_key(query, query_len, cache_key);
+
+			void *cached_data = NULL;
+			uint32_t cached_size = 0;
+
+			if (mysqli_cache_lookup(cache_key, (uint32_t)MyG(cache_ttl), &cached_data, &cached_size)) {
+				/* Cache HIT */
+				result = mysqli_cache_deserialize_result(mysql->mysql->data, cached_data, cached_size);
+				efree(cached_data);
+
+				if (result) {
+					if (MyG(cache_debug)) {
+						mysqli_cache_log("HIT", cache_key, query, NULL);
+					}
+					mysqli_resource = (MYSQLI_RESOURCE *)ecalloc(1, sizeof(MYSQLI_RESOURCE));
+					mysqli_resource->ptr = (void *)result;
+					mysqli_resource->status = MYSQLI_STATUS_VALID;
+					MYSQLI_RETVAL_RESOURCE(mysqli_resource, mysqli_result_class_entry);
+					return;
+				}
+				/* Deserialization failed — fall through to real query */
+			} else if (MyG(cache_debug)) {
+				mysqli_cache_log("MISS", cache_key, query, NULL);
+			}
+		}
+	}
+
+	/* ---- Real query ---- */
 	if (mysql_real_query(mysql->mysql, query, query_len)) {
 		/* Save failed query string to 'last_query_error' before reporting error (which may throw) */
 		zend_update_property_string(Z_OBJCE_P(ZEND_THIS), Z_OBJ_P(ZEND_THIS), "last_query_error", sizeof("last_query_error")-1, query);
@@ -618,7 +661,7 @@ PHP_FUNCTION(mysqli_query)
 		RETURN_TRUE;
 	}
 
-	switch (resultmode & ~(MYSQLI_ASYNC | MYSQLI_STORE_RESULT_COPY_DATA)) {
+	switch (effective_mode & ~(MYSQLI_ASYNC | MYSQLI_STORE_RESULT_COPY_DATA)) {
 		case MYSQLI_STORE_RESULT:
 			result = mysql_store_result(mysql->mysql);
 			break;
@@ -635,7 +678,26 @@ PHP_FUNCTION(mysqli_query)
 		php_mysqli_report_index(query, mysqli_server_status(mysql->mysql));
 	}
 
-	mysqli_resource = (MYSQLI_RESOURCE *)ecalloc (1, sizeof(MYSQLI_RESOURCE));
+	/* ---- Cache store (only buffered results) ---- */
+	if (use_cache && (effective_mode & ~(MYSQLI_ASYNC | MYSQLI_STORE_RESULT_COPY_DATA)) == MYSQLI_STORE_RESULT) {
+		char cache_key[MYSQLI_CACHE_KEY_LEN];
+		mysqli_cache_compute_key(query, query_len, cache_key);
+
+		uint32_t serial_size = 0;
+		void *serial_data = mysqli_cache_serialize_result(result, &serial_size);
+		if (serial_data) {
+			mysqli_cache_store(cache_key, (uint32_t)MyG(cache_ttl), serial_data, serial_size);
+			efree(serial_data);
+			if (MyG(cache_debug)) {
+				mysqli_cache_log("STORE", cache_key, query, NULL);
+			}
+		}
+
+		/* Reset cursor so caller can iterate from the beginning */
+		mysql_data_seek(result, 0);
+	}
+
+	mysqli_resource = (MYSQLI_RESOURCE *)ecalloc(1, sizeof(MYSQLI_RESOURCE));
 	mysqli_resource->ptr = (void *)result;
 	mysqli_resource->status = MYSQLI_STATUS_VALID;
 	MYSQLI_RETVAL_RESOURCE(mysqli_resource, mysqli_result_class_entry);
